@@ -1,0 +1,9 @@
+{
+  "name": "SPV Training",
+  "short_name": "SPV Training",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#111315",
+  "theme_color": "#111315",
+  "icons": []
+}
