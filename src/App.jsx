@@ -7,6 +7,8 @@ import {
   X, LogOut, Cloud, CloudOff, ChevronRight, Flame, Target, CheckCircle2
 } from 'lucide-react';
 
+import { HISTORY_ENTRIES, HISTORY_TESTS } from './historique.js';
+
 const URL = import.meta.env.VITE_SUPABASE_URL;
 const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabase = URL && KEY ? createClient(URL, KEY) : null;
@@ -101,6 +103,21 @@ export default function App(){
   const signUp = async e => {e.preventDefault();setBusy(true);setAuthMsg('');
     const {error}=await supabase.auth.signUp({email,password});
     setAuthMsg(error?.message || 'Compte créé. Vérifie ton e-mail si la confirmation est activée.');setBusy(false);};
+  const needsImport = !data.entries.some(e=>e.id===HISTORY_ENTRIES[0].id);
+  const importHistory = async () => {
+    const ids = new Set(HISTORY_ENTRIES.map(e=>e.id)), tids = new Set(HISTORY_TESTS.map(t=>t.id));
+    const demo = new Set(['demo1','t1','t2','t3']);
+    setData(old=>({...old,
+      entries:[...HISTORY_ENTRIES,...old.entries.filter(e=>!ids.has(e.id)&&!demo.has(e.id))],
+      tests:[...HISTORY_TESTS,...old.tests.filter(t=>!tids.has(t.id)&&!demo.has(t.id))]}));
+    if(supabase && session?.user){
+      const u=session.user.id;
+      const a=await supabase.from('training_entries').upsert(HISTORY_ENTRIES.map(r=>({...r,user_id:u})),{onConflict:'id'});
+      const b=await supabase.from('test_results').upsert(HISTORY_TESTS.map(r=>({...r,user_id:u})),{onConflict:'id'});
+      const err=a.error||b.error;
+      setSyncMsg(err?'Import local fait, mais synchronisation impossible : '+err.message:'Historique importé et synchronisé');
+    }
+  };
   const signOut = async()=>{await supabase?.auth.signOut();setSession(null);};
   const title = nav.find(n=>n[0]===page)?.[1] || 'Vue d’ensemble';
   const recent = [...data.entries].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,4);
@@ -118,7 +135,7 @@ export default function App(){
     <main className="main">
       <header className="topbar"><button className="hamburger" onClick={()=>setMobile(true)}><Menu/></button><div className="crumb">SPV TRAINING <span>/</span> <b>{title.toUpperCase()}</b></div><div className="top-actions"><span className={`sync ${session?'online':''}`}>{session?<Cloud size={15}/>:<CloudOff size={15}/>} {session?'Connecté':supabase?'Hors connexion':'Mode local'}</span><div className="date-pill">{new Date().toLocaleDateString('fr-FR',{weekday:'short',day:'2-digit',month:'short'})}</div></div></header>
       <div className="content">
-        {page==='dashboard'&&<Dashboard data={data} recent={recent} completed={completed} avgEnergy={avgEnergy} setPage={setPage} setModal={setModal}/>}
+        {page==='dashboard'&&<Dashboard data={data} recent={recent} completed={completed} avgEnergy={avgEnergy} setPage={setPage} setModal={setModal} needsImport={needsImport} importHistory={importHistory}/>}
         {page==='journal'&&<Journal rows={data.entries} setModal={setModal} remove={id=>removeRow('training_entries','entries',id)}/>}
         {page==='stats'&&<Stats data={data}/>}
         {page==='planning'&&<Planning rows={data.plans} setModal={setModal} toggle={async row=>{const next={...row,status:row.status==='Terminée'?'À faire':'Terminée'};update('plans',data.plans.map(x=>x.id===row.id?next:x));if(supabase&&session?.user)await supabase.from('plans').update({status:next.status}).eq('id',row.id).eq('user_id',session.user.id);}} remove={id=>removeRow('plans','plans',id)}/>}
@@ -138,7 +155,7 @@ export default function App(){
 function PageHead({eyebrow,title,desc,action}){return <div className="page-head"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{desc}</p></div>{action}</div>}
 function Button({children,onClick,kind='primary'}){return <button className={`btn ${kind}`} onClick={onClick}>{children}</button>}
 function Metric({label,value,unit,icon:Icon,sub}){return <div className="metric"><div className="metric-top"><span>{label}</span><div className="metric-icon"><Icon size={18}/></div></div><div className="metric-value">{value}<small>{unit}</small></div><div className="metric-sub">{sub}</div></div>}
-function Dashboard({data,recent,completed,avgEnergy,setPage,setModal}){
+function Dashboard({data,recent,completed,avgEnergy,setPage,setModal,needsImport,importHistory}){
  const last=[...data.tests].sort((a,b)=>b.date.localeCompare(a.date));
  const test=initialTests.map(t=>{const r=last.find(x=>x.test_key===t.key);return {...t,current:r?.value??0,date:r?.date};});
  return <>
@@ -148,6 +165,7 @@ function Dashboard({data,recent,completed,avgEnergy,setPage,setModal}){
   <div className="test-grid">{test.map(t=><div className="test-card" key={t.key}><div className="test-card-head"><span>{t.label}</span><span className="test-dot"/></div><div className="test-number">{t.current||'—'}<small> {t.unit}</small></div><div className="progress"><i style={{width:Math.min(100,(t.current/t.target)*100)+'%'}}/></div><div className="test-foot"><span>Objectif : {t.target} {t.unit}</span><b>{t.current?Math.min(100,Math.round(t.current/t.target*100))+'%':'À renseigner'}</b></div></div>)}</div>
   <div className="two-col"><section className="panel"><div className="panel-head"><div><div className="eyebrow">DERNIÈRES ACTIVITÉS</div><h2>Ton journal</h2></div><button className="text-link" onClick={()=>setPage('journal')}>Tout voir <ChevronRight size={16}/></button></div>{recent.length?recent.map(r=><div className="activity-row" key={r.id}><div className="activity-icon"><Activity size={18}/></div><div className="activity-info"><b>{r.title}</b><small>{fmtDate(r.date)} · {r.category}</small></div><strong>{r.duration_minutes?`${r.duration_minutes} min`:'—'}</strong></div>):<Empty text="Tes séances apparaîtront ici."/>}</section>
   <section className="panel"><div className="panel-head"><div><div className="eyebrow">À VENIR</div><h2>Planning</h2></div><button className="text-link" onClick={()=>setPage('planning')}>Calendrier <ChevronRight size={16}/></button></div>{data.plans.slice(0,4).map(p=><div className="plan-row" key={p.id}><div className="plan-date"><b>{new Date(p.date+'T12:00:00').getDate()}</b><small>{new Date(p.date+'T12:00:00').toLocaleDateString('fr-FR',{month:'short'})}</small></div><div className="activity-info"><b>{p.title}</b><small>{p.category}</small></div><span className={`status ${p.status==='Terminée'?'done':''}`}>{p.status}</span></div>)}{!data.plans.length&&<Empty text="Aucune séance programmée."/>}</section></div>
+  {needsImport&&<div className="quick-actions" style={{marginBottom:19}}><div><b>Historique ChatGPT prêt à importer</b><small>{HISTORY_ENTRIES.length} séances (29/08 → 25/11) et {HISTORY_TESTS.length} résultats d’épreuves. Remplace les données d’exemple.</small></div><Button onClick={importHistory}>Importer</Button></div>}
   <div className="quick-actions"><div><b>Prêt à enregistrer une séance ?</b><small>Garde une trace de chaque effort.</small></div><Button onClick={()=>setModal('entry')}><Plus size={17}/> Nouvelle séance</Button></div>
  </>;
 }
